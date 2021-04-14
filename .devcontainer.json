@@ -1,0 +1,4 @@
+{
+    "image": "mcr.microsoft.com/vscode/devcontainers/dotnet:5.0",
+    "extensions": ["ms-dotnettools.csharp"]
+}
