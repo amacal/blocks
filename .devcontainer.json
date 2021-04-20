@@ -1,4 +1,5 @@
 {
     "image": "mcr.microsoft.com/vscode/devcontainers/dotnet:5.0",
-    "extensions": ["ms-dotnettools.csharp"]
+    "extensions": ["ms-dotnettools.csharp"],
+    "mounts": ["type=bind,source=d:\\data,target=/tmp/blocks"]
 }

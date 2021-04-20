@@ -1,25 +1,30 @@
+using System.Runtime.InteropServices;
+
 namespace Blocks.Core
 {
-    public struct DataReference
+    [StructLayout(LayoutKind.Explicit, Size=7)]
+    public struct KeyReference
     {
-        public short Block;
-        public int Offset;
-        public byte KeyLength;
-        public ushort ValueLength;
+        [FieldOffset(0)] public short Block;
+        [FieldOffset(2)] public int Offset;
+        [FieldOffset(6)] public byte Length;
 
-        public int GetEnd()
+        public bool IsTail(int offset)
         {
-            return Offset + GetLength();
+            return offset == Offset + Length;
         }
+    }
 
-        public int GetLength()
-        {
-            return KeyLength + ValueLength;
-        }
+    [StructLayout(LayoutKind.Explicit, Size=8)]
+    public struct ValueReference
+    {
+        [FieldOffset(0)] public short Block;
+        [FieldOffset(2)] public int Offset;
+        [FieldOffset(6)] public ushort Length;
 
-        public int GetValueOffset()
+        public bool IsTail(int offset)
         {
-            return Offset + KeyLength;
+            return offset == Offset + Length;
         }
     }
 }

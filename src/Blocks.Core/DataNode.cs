@@ -1,11 +1,15 @@
 using System;
+using System.Runtime.InteropServices;
 
 namespace Blocks.Core
 {
+    [StructLayout(LayoutKind.Explicit, Size=23)]
     public struct DataNode
     {
-        public int Next;
-        public DataReference Reference;
+        [FieldOffset(0)] public int Next;
+        [FieldOffset(4)] public int Fetched;
+        [FieldOffset(8)] public KeyReference Key;
+        [FieldOffset(15)] public ValueReference Value;
     }
 
     public class DataNodeBitmap
@@ -17,6 +21,11 @@ namespace Blocks.Core
         {
             this.offset = 0;
             this.values = new DataNode[0][];
+        }
+
+        public int Count()
+        {
+            return offset;
         }
 
         public int Size()
