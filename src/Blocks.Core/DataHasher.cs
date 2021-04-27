@@ -4,33 +4,25 @@ namespace Blocks.Core
 {
     public class DataHasher
     {
-        private static readonly int[] Primes =
-        {
-            17, 33, 67, 131, 257, 521, 1031, 2053, 4099, 8209, 16411,
-            32771, 65537, 131101, 262147, 524309, 1048583, 2097169,
-            4194319, 8388617, 16777259, 33554467, 67108879, 134217757,
-            268435459, 536870923, 1073741827, 2147483647
-        };
-
         private readonly int level;
         private readonly int value;
 
-        public DataHasher() : this(0) {}
+        public DataHasher() : this(4) {}
 
-        private DataHasher(int level)
+        public DataHasher(int level)
         {
             this.level = level;
-            this.value = Primes[level];
-        }
-
-        public int GetSize()
-        {
-            return value;
+            this.value = (1 << level) - 1;
         }
 
         public int GetCapacity()
         {
-            return value;
+            return value + 1;
+        }
+
+        public int GetMask()
+        {
+            return 1 << (level - 1);
         }
 
         public DataHasher Prev()
@@ -43,14 +35,15 @@ namespace Blocks.Core
             return new DataHasher(level + 1);
         }
 
-        public int Hash(Span<byte> data)
+        public int Hash(byte[] data, int offset, int length)
         {
             unchecked
             {
                 const int p = 16777619;
                 int hash = (int)2166136261;
+                int end = length + offset;
 
-                for (int i = 0; i < data.Length; i++)
+                for (int i = offset; i < end; i++)
                     hash = (hash ^ data[i]) * p;
 
                 hash += hash << 13;
@@ -59,13 +52,13 @@ namespace Blocks.Core
                 hash ^= hash >> 17;
                 hash += hash << 5;
 
-                return hash >= 0 ? hash % value : -hash % value;
+                return hash >= 0 ? hash & value : -hash & value;
             }
         }
 
         public int[] Initialize()
         {
-            return new int[value];
+            return new int[value + 1];
         }
     }
 }
