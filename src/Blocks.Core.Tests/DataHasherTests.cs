@@ -9,7 +9,7 @@ namespace Blocks.Core.Tests
         [Test]
         public void DistributesHashesEqually()
         {
-            DataHasher hasher = new DataHasher(24);
+            DataHasher hasher = new DataHasher(24, 24);
             int[] occurences = new int[hasher.GetCapacity()];
 
             for (int i = 0; i < 256 * 256 * 256; i++)

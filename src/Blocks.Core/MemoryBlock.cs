@@ -1,27 +1,38 @@
 ﻿using System;
+using System.Collections.Generic;
 using System.IO;
 
 namespace Blocks.Core
 {
     public class InMemory
     {
+        private readonly Queue<byte[]> pool;
         private readonly string path;
-        private readonly int size;
+        private readonly long size;
 
         public InMemory(string path, int size)
         {
             this.path = path;
             this.size = size;
+            this.pool = new Queue<byte[]>();
         }
 
-        public int GetSize()
+        public long SizeInBytes()
+        {
+            return size * pool.Count;
+        }
+
+        public long GetSize()
         {
             return size;
         }
 
         public InMemoryBlock Block(int index)
         {
-            return new InMemoryBlock(index, size);
+            if (pool.TryDequeue(out var data) == false)
+                data = new byte[size];
+
+            return new InMemoryBlock(index, data);
         }
 
         public InMemoryManager Manager()
@@ -31,7 +42,15 @@ namespace Blocks.Core
 
         public ValueBuilder Builder(short index)
         {
-            return new ValueBuilder(index, Path.Combine(path, $"{Path.GetRandomFileName()}.tmp"), size);
+            if (pool.TryDequeue(out var data) == false)
+                data = new byte[size];
+
+            return new ValueBuilder(index, Path.Combine(path, $"{Path.GetRandomFileName()}.tmp"), data);
+        }
+
+        public void Release(byte[] data)
+        {
+            this.pool.Enqueue(data);
         }
     }
 
@@ -65,56 +84,57 @@ namespace Blocks.Core
         }
     }
 
-    public class InMemoryManager
+    public class InMemoryEvolution
     {
         private readonly InMemory memory;
+        private readonly HashSet<int> obsolete;
         private InMemoryBlock[] blocks;
+        private InMemoryBlock[] abandoned;
         private ValueFile[] files;
         private ValueBuilder builder;
+        private InMemoryBlock current;
 
-        public InMemoryManager(InMemory memory)
+        public InMemoryEvolution(InMemory memory, ValueBuilder builder, InMemoryBlock[] available, InMemoryBlock[] abandoned, ValueFile[] files)
         {
-            this.memory = memory;
-            this.files = new ValueFile[0];
-            this.builder = memory.Builder(-1);
-            this.blocks = new InMemoryBlock[] { memory.Block(0) };
-        }
-
-        private InMemoryManager(InMemory memory, ValueBuilder builder, ValueFile[] files)
-        {
-            this.memory = memory;
-            this.builder = builder;
             this.files = files;
-            this.blocks = new InMemoryBlock[] { memory.Block(0) };
-        }
+            this.blocks = available;
+            this.memory = memory;
+            this.abandoned = abandoned;
 
-        public void Dispose()
-        {
-        }
+            this.builder = builder;
+            this.obsolete = new HashSet<int>();
 
-        public long GetDeclaredMemory()
-        {
-            return blocks.LongLength * memory.GetSize();
-        }
-
-        public long GetUsedMemory()
-        {
-            long memory = 0;
+            for (int i = 0; i < abandoned.Length; i++)
+                if (abandoned[i] != null)
+                    obsolete.Add(i);
 
             for (int i = 0; i < blocks.Length; i++)
-                memory += blocks[i].GetUsed();
+            {
+                if (blocks[i] == null)
+                {
+                    blocks[i] = memory.Block(i);
+                    current = available[i];
+                    break;
+                }
+            }
 
-            return memory;
+            if (available == null)
+            {
+                Array.Resize(ref blocks, blocks.Length + 1);
+                blocks[^1] = memory.Block(blocks.Length - 1);
+
+                current = blocks[^1];
+            }
         }
 
-        public InMemoryManager Evolve()
+        public bool Contains(short block)
         {
-            return new InMemoryManager(memory, builder, files);
+            return obsolete.Contains(block);
         }
 
         public InMemoryAllocation Allocate(int size)
         {
-            InMemoryBlock block = blocks[^1];
+            InMemoryBlock block = current;
             int offset = block.Allocate(size);
 
             if (offset == -1)
@@ -128,51 +148,175 @@ namespace Blocks.Core
 
         private InMemoryBlock Find(int size)
         {
-            for (int i = blocks.Length - 2; i >= 0; i--)
+            for (int i = blocks.Length - 1; i >= 0; i--)
+            {
+                if (blocks[i] == null)
+                    return current = blocks[i] = memory.Block(i);
+
                 if (blocks[i].GetLeft() >= size)
-                    return blocks[i];
+                    return current = blocks[i];
+            }
 
             Array.Resize(ref blocks, blocks.Length + 1);
             blocks[^1] = memory.Block(blocks.Length - 1);
 
-            return blocks[^1];
+            return current = blocks[^1];
         }
 
-        public TreeReference Extract(ref TreeNode node)
+        public InMemoryManager Create()
+        {
+            for (int i = 0; i < abandoned.Length; i++)
+                if (abandoned[i] != null)
+                    abandoned[i].Free(memory);
+
+            return new InMemoryManager(memory, builder, blocks, files);
+        }
+    }
+
+    public class InMemoryManager
+    {
+        private readonly InMemory memory;
+        private InMemoryBlock[] blocks;
+        private ValueFile[] files;
+        private ValueBuilder builder;
+        private InMemoryBlock available;
+        private short current;
+        private long bytes;
+
+        public InMemoryManager(InMemory memory)
+        {
+            this.memory = memory;
+            this.files = new ValueFile[0];
+            this.current = -1;
+            this.builder = memory.Builder(-1);
+            this.available = memory.Block(0);
+            this.blocks = new InMemoryBlock[] { available };
+            this.bytes = memory.GetSize();
+        }
+
+        public InMemoryManager(InMemory memory, ValueBuilder builder, InMemoryBlock[] blocks, ValueFile[] files)
+        {
+            this.memory = memory;
+            this.builder = builder;
+            this.current = builder.GetIndex();
+            this.files = files;
+            this.available = blocks[0];
+            this.blocks = blocks;
+            this.bytes = 0;
+
+            for (int i = 0; i < blocks.Length; i++)
+                if (blocks[i] != null)
+                    bytes += memory.GetSize();
+        }
+
+        public long SizeInBytes()
+        {
+            return bytes + memory.SizeInBytes() + (builder != null ? memory.GetSize() : 0);
+        }
+
+        public long GetDeclaredMemory()
+        {
+            return bytes;
+        }
+
+        public long GetUsedMemory()
+        {
+            long memory = 0;
+
+            for (int i = 0; i < blocks.Length; i++)
+                if (blocks[i] != null)
+                    memory += blocks[i].GetUsed();
+
+            return memory;
+        }
+
+        public InMemoryEvolution Evolve(double factor)
+        {
+            InMemoryBlock[] taken = new InMemoryBlock[blocks.Length];
+            InMemoryBlock[] abandoned = new InMemoryBlock[blocks.Length];
+
+            for (int i = 0; i < taken.Length; i++)
+            {
+                if (1.0 * blocks[i].GetWasted() / memory.GetSize() <= factor)
+                    taken[i] = blocks[i];
+                else
+                    abandoned[i] = blocks[i];
+            }
+
+            return new InMemoryEvolution(memory, builder, taken, abandoned, files);
+        }
+
+        public InMemoryAllocation Allocate(int size)
+        {
+            InMemoryBlock block = available;
+            int offset = block.Allocate(size);
+
+            if (offset == -1)
+            {
+                block = Find(size);
+                offset = block.Allocate(size);
+            }
+
+            return block.Extract(offset, size);
+        }
+
+        private InMemoryBlock Find(int size)
+        {
+            for (int i = blocks.Length - 1; i >= 0; i--)
+            {
+                if (blocks[i] == null)
+                {
+                    bytes += memory.GetSize();
+                    blocks[i] = memory.Block(i);;
+                    return available = blocks[i];
+                }
+
+                if (blocks[i].GetLeft() >= size)
+                    return available = blocks[i];
+            }
+
+            Array.Resize(ref blocks, blocks.Length + 1);
+            blocks[^1] = memory.Block(blocks.Length - 1);
+
+            bytes += memory.GetSize();
+            return available = blocks[^1];
+        }
+
+        public TreeReference Extract(TreeNode node)
         {
             if (node.Block >= 0) return blocks[node.Block].GetTree(node);
-            else if (node.Block == -files.Length - 1) return builder.GetTree(node);
+            else if (node.Block == current) return builder.GetTree(node);
             else return files[-node.Block - 1].GetTree(node);
         }
 
         public ValueInfo Extract(ref ValueNode node)
         {
             if (node.Block >= 0) return blocks[node.Block].Extract(node);
-            else if (node.Block == -files.Length - 1) return builder.Extract(node);
+            else if (node.Block == current) return builder.Extract(node);
             else return files[-node.Block - 1].Extract(node);
         }
 
         public void Overwrite(ref ValueNode node, ValueInfo value)
         {
             if (node.Block >= 0) blocks[node.Block].Overwrite(node, value);
-            else if (node.Block == -files.Length - 1) builder.Overwrite(node, value);
+            else if (node.Block == current) builder.Overwrite(node, value);
             else
             {
                 node.Offset = Prepare(node.Length).Append(value);
-                node.Block = builder.GetIndex();
+                node.Block = current;
             }
         }
 
         public void Remove(TreeNode node)
         {
             if (node.Block >= 0) blocks[node.Block].Remove(node);
-            else if (node.Block == -files.Length - 1) builder.Remove(node);
+            else if (node.Block == current) builder.Remove(node);
         }
 
         public void Remove(ValueNode node)
         {
             if (node.Block >= 0) blocks[node.Block].Remove(node);
-            else if (node.Block == -files.Length - 1) builder.Remove(node);
+            else if (node.Block == current) builder.Remove(node);
         }
 
         public int Archive(ref TreeNode node)
@@ -181,7 +325,7 @@ namespace Blocks.Core
             int offset = Prepare(reference.Length).Append(reference);
 
             node.Offset = offset;
-            node.Block = builder.GetIndex();
+            node.Block = current;
 
             return reference.Length;
         }
@@ -192,7 +336,7 @@ namespace Blocks.Core
             int offset = Prepare(reference.Length).Append(reference);
 
             node.Offset = offset;
-            node.Block = builder.GetIndex();
+            node.Block = current;
 
             return reference.Length;
         }
@@ -202,9 +346,10 @@ namespace Blocks.Core
             if (builder.GetLeft() >= size) return builder;
 
             Array.Resize(ref files, files.Length + 1);
-            files[^1] = builder.Flush();
+            files[^1] = builder.Flush(memory);
 
-            return builder = memory.Builder((short)(-files.Length - 1));
+            current = (short)(-files.Length - 1);
+            return builder = memory.Builder(current);
         }
     }
 
@@ -215,10 +360,10 @@ namespace Blocks.Core
         private int offset;
         private int wasted;
 
-        public InMemoryBlock(int block, int size)
+        public InMemoryBlock(int block, byte[] data)
         {
             this.block = block;
-            this.data = new byte[size];
+            this.data = data;
         }
 
         public short GetIndex()
@@ -239,6 +384,11 @@ namespace Blocks.Core
         public int GetWasted()
         {
             return wasted;
+        }
+
+        public void Free(InMemory memory)
+        {
+            memory.Release(data);
         }
 
         /// <summary>
@@ -316,11 +466,11 @@ namespace Blocks.Core
         private int offset;
         private int wasted;
 
-        public ValueBuilder(short block, string path, int size)
+        public ValueBuilder(short block, string path, byte[] data)
         {
             this.block = block;
             this.path = path;
-            this.data = new byte[size];
+            this.data = data;
         }
 
         public bool IsEmpty()
@@ -404,14 +554,15 @@ namespace Blocks.Core
             return (offset += value.Length) - value.Length;
         }
 
-        public ValueFile Flush()
+        public ValueFile Flush(InMemory memory)
         {
-            FileMode mode = FileMode.Create;
-            FileStream stream = new FileStream(path, mode);
+            FileOptions options = FileOptions.DeleteOnClose | FileOptions.RandomAccess | FileOptions.WriteThrough;
+            FileStream stream = new FileStream(path, FileMode.Create, FileAccess.ReadWrite, FileShare.None, 4096, options);
 
             stream.Write(data, 0, offset);
             stream.Flush();
 
+            memory?.Release(data);
             return new ValueFile(stream, offset);
         }
     }
@@ -439,7 +590,7 @@ namespace Blocks.Core
             byte[] data = new byte[length];
 
             stream.Seek(node.Offset, SeekOrigin.Begin);
-            
+
             int read = 0, loops = 0;
             while (read < length && loops < 10)
             {
@@ -456,7 +607,7 @@ namespace Blocks.Core
             byte[] data = new byte[length];
 
             stream.Seek(node.Offset, SeekOrigin.Begin);
-            
+
             int read = 0, loops = 0;
             while (read < length && loops < 10)
             {

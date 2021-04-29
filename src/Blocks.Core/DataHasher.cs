@@ -4,15 +4,20 @@ namespace Blocks.Core
 {
     public class DataHasher
     {
+        private readonly int maximum;
         private readonly int level;
         private readonly int value;
 
-        public DataHasher() : this(4) {}
-
-        public DataHasher(int level)
+        public DataHasher(int level, int maximum)
         {
-            this.level = level;
-            this.value = (1 << level) - 1;
+            this.maximum = maximum;
+            this.level = Math.Min(level, maximum);
+            this.value = (1 << this.level) - 1;
+        }
+
+        public bool IsMaximum()
+        {
+            return level >= maximum;
         }
 
         public int GetCapacity()
@@ -25,14 +30,9 @@ namespace Blocks.Core
             return 1 << (level - 1);
         }
 
-        public DataHasher Prev()
-        {
-            return new DataHasher(level - 1);
-        }
-
         public DataHasher Next()
         {
-            return new DataHasher(level + 1);
+            return new DataHasher(level + 1, maximum);
         }
 
         public int Hash(byte[] data, int offset, int length)

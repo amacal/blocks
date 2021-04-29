@@ -5,6 +5,8 @@ namespace Blocks.Core
 {
     public ref struct TreeReference
     {
+        private static readonly int NegativeByteBlockOffset = BitConverter.IsLittleEndian ? 2 : 1;
+
         public readonly TreeNode Node;
         public readonly byte[] Data;
 
@@ -46,7 +48,12 @@ namespace Blocks.Core
 
         public ref ValueNode GetValue(int index)
         {
-            return ref MemoryMarshal.AsRef<ValueNode>(Data.AsSpan(Node.Offset + 1 + Data[Node.Offset] + 8 * index, 8));
+            return ref MemoryMarshal.AsRef<ValueNode>(Data.AsSpan(Node.Offset + 1 + Data[Node.Offset] + (index << 3), 8));
+        }
+
+        public bool InMemory(int index)
+        {
+            return Data[Node.Offset + NegativeByteBlockOffset + Data[Node.Offset] + (index << 3)] < 128;
         }
 
         public ref ValueNode Find(KeyInfo key, out int index)
@@ -394,9 +401,9 @@ namespace Blocks.Core
             return offset;
         }
 
-        public int Size()
+        public long SizeInBytes()
         {
-            return values.Length * 1048576;
+            return values.LongLength * 1048576 * 8;
         }
 
         public int Allocate()
@@ -430,6 +437,39 @@ namespace Blocks.Core
                 Block = block,
                 Offset = offset,
             };
+        }
+    }
+
+    public class HashNodeBitmap
+    {
+        private int[][] values;
+
+        public HashNodeBitmap()
+        {
+            this.values = new int[0][];
+        }
+
+        public long SizeInBytes()
+        {
+            return values.LongLength * 1048576;
+        }
+
+        public void Resize(int size)
+        {
+            Array.Resize(ref values, (size >> 18) + 1);
+
+            for (int i = 0; i < values.Length; i++)
+                if (values[i] == null) values[i] = new int[262144];
+        }
+
+        public int Get(int index)
+        {
+            return values[index >> 18][index & 262143];
+        }
+
+        public void Set(int index, int value)
+        {
+            values[index >> 18][index & 262143] = value;
         }
     }
 }

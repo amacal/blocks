@@ -8,7 +8,7 @@ namespace Blocks.Core.Tests
     {
         public void CanOverrideExistingValue()
         {
-            InMemoryBlock block = new InMemoryBlock(13, 1024);
+            InMemoryBlock block = new InMemoryBlock(13, new byte[1024]);
             int index = block.Allocate(5);
 
             ValueNode node = new ValueNode { Offset = index, Length = 5 };
@@ -24,7 +24,7 @@ namespace Blocks.Core.Tests
         [Test]
         public void CanRemoveExistingValue()
         {
-            InMemoryBlock block = new InMemoryBlock(13, 1024);
+            InMemoryBlock block = new InMemoryBlock(13, new byte[1024]);
             int index = block.Allocate(5);
 
             ValueNode node = new ValueNode { Offset = index, Length = 5 };
@@ -37,7 +37,7 @@ namespace Blocks.Core.Tests
         [Test]
         public void CanRemoveExistingTree()
         {
-            InMemoryBlock block = new InMemoryBlock(13, 1024);
+            InMemoryBlock block = new InMemoryBlock(13, new byte[1024]);
             TreeInsert insert = TreeReference.Insert(KeyValueInfo.From(new byte[] { 1, 2, 10, 20, 30 }, 2));
 
             int allocated = block.Allocate(insert.GetSize());

@@ -10,60 +10,56 @@ namespace Blocks.Core.Tests
         [Test]
         public void ReturnsNothingIfNotFound()
         {
-            MemoryTable table = new MemoryTable("/tmp/blocks/", 1024);
+            MemoryTable table = new MemoryTable("/tmp/blocks/", 1024, 24);
             ValueInfo data = table.Get(KeyInfo.From(new byte[] { 1, 2 }));
 
             Assert.True(data.Data == null);
             Assert.That(table.GetSize(), Is.EqualTo(0));
-            Assert.That(table.GetCapacity(), Is.EqualTo(16));
         }
 
         [Test]
         public void ReturnsAlreadyInsertedValue()
         {
-            MemoryTable table = new MemoryTable("/tmp/blocks/", 1024);
+            MemoryTable table = new MemoryTable("/tmp/blocks/", 1024, 24);
             table.Set(KeyValueInfo.From(new byte[] { 1, 2, 20, 30, 40 }, 2));
 
             ValueInfo data = table.Get(KeyInfo.From(new byte[] { 1, 2 }));
             Assert.True(data.AsSpan().SequenceEqual(new byte[] { 20, 30, 40 }));
 
             Assert.That(table.GetSize(), Is.EqualTo(1));
-            Assert.That(table.GetCapacity(), Is.EqualTo(16));
         }
 
         [Test]
         public void ReturnsAlreadyOverriddendValueWithShorter()
         {
-            MemoryTable table = new MemoryTable("/tmp/blocks/", 1024);
+            MemoryTable table = new MemoryTable("/tmp/blocks/", 1024, 24);
             table.Set(KeyValueInfo.From(new byte[] { 1, 2, 20, 30, 40 }, 2));
             table.Set(KeyValueInfo.From(new byte[] { 1, 2, 50, 60 }, 2));
 
             ValueInfo data = table.Get(KeyInfo.From(new byte[] { 1, 2 }));
             Assert.True(data.AsSpan().SequenceEqual(new byte[] { 50, 60 }));
-            
+
             Assert.That(table.GetSize(), Is.EqualTo(1));
-            Assert.That(table.GetCapacity(), Is.EqualTo(16));
         }
 
         [Test]
         public void ReturnsAlreadyOverriddendValueWithLonger()
         {
-            MemoryTable table = new MemoryTable("/tmp/blocks/", 1024);
+            MemoryTable table = new MemoryTable("/tmp/blocks/", 1024, 24);
             table.Set(KeyValueInfo.From(new byte[] { 1, 2, 20, 30, 40 }, 2));
             table.Set(KeyValueInfo.From(new byte[] { 1, 2, 50, 60, 70, 80 }, 2));
 
             ValueInfo data = table.Get(KeyInfo.From(new byte[] { 1, 2 }));
             Assert.True(data.AsSpan().SequenceEqual(new byte[] { 50, 60, 70, 80 }));
-            
+
             Assert.That(table.GetSize(), Is.EqualTo(1));
-            Assert.That(table.GetCapacity(), Is.EqualTo(16));
         }
 
         [Test]
         public void ResizesWhenCapacityCrossed()
         {
             Random random = new Random(0);
-            MemoryTable table = new MemoryTable("/tmp/blocks/", 65536);
+            MemoryTable table = new MemoryTable("/tmp/blocks/", 65536, 24);
             var native = new Dictionary<byte[], byte[]>();
 
             for (int i = 0; i < 150; i++)
