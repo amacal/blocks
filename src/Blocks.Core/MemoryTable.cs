@@ -78,28 +78,37 @@ namespace Blocks.Core
 
     public class MemoryTable
     {
+        private readonly Settings settings;
         private int size;
+        private int depth;
         private HashNodeBitmap nodes;
         private InMemory inMemory;
         private DataHasher hasher;
         private InMemoryManager blocks;
         private TreeNodeBitmap bitmap;
 
-        public MemoryTable(string path, int blockSize, int depth)
+        public MemoryTable(Settings settings)
         {
-            this.hasher = new DataHasher(6, depth);
+            this.hasher = new DataHasher(settings.InitialDepth, settings.MaximalDepth);
             this.bitmap = new TreeNodeBitmap();
 
             this.nodes = new HashNodeBitmap();
             this.nodes.Resize(hasher.GetCapacity());
 
-            this.inMemory = new InMemory(path, blockSize);
+            this.inMemory = new InMemory(settings.Path, settings.BlockSize);
             this.blocks = this.inMemory.Manager();
+
+            this.settings = settings;
         }
 
         public int GetSize()
         {
             return size;
+        }
+
+        public int GetDepth()
+        {
+            return depth;
         }
 
         public int GetCapacity()
@@ -123,6 +132,7 @@ namespace Blocks.Core
                 TreeReference tree = Cache(ref node, blocks.Extract(node));
 
                 node.Accessed++;
+                depth = Math.Max(depth, tree.Size());
 
                 ref ValueNode link = ref tree.Find(key, out index);
                 if (index >= 0) return blocks.Extract(ref link);
@@ -149,7 +159,7 @@ namespace Blocks.Core
                 Insert(default(TreeReference), null, -1, hash, keyValue);
 
             if (hasher.GetCapacity() < size && hasher.IsMaximum() == false) Rebuild();
-            if (blocks.GetDeclaredMemory() > 2048L * 1048576) Archive();
+            if (blocks.GetDeclaredMemory() > settings.BlockMemory) Archive();
         }
 
         private void Update(TreeReference tree, ref ValueNode link, int index, int hash, KeyValueInfo keyValue)
@@ -212,6 +222,7 @@ namespace Blocks.Core
 
             int mask = hasher.GetMask();
             nodes.Resize(hasher.GetCapacity());
+            depth = 0;
 
             for (int i = 0; i < capacity; i++)
             {
@@ -223,11 +234,12 @@ namespace Blocks.Core
                     TreeReference tree = blocks.Extract(node);
 
                     TreeSplit split = tree.Split(hasher);
-                    if (split.RightSize() == 0) continue;
+                    if (split.RightSize() == 0) depth = Math.Max(depth, tree.Size());
                     else if (split.LeftSize() == 0)
                     {
                         nodes.Set(i, 0);
                         nodes.Set(i + mask, index);
+                        depth = Math.Max(depth, tree.Size());
                     }
                     else
                     {
@@ -242,6 +254,9 @@ namespace Blocks.Core
                         bitmap.Set(index, first.Block, first.Offset);
                         bitmap.Set(allocated, second.Block, second.Offset);
                         nodes.Set(i + mask, allocated);
+
+                        depth = Math.Max(depth, left.Size());
+                        depth = Math.Max(depth, right.Size());
                     }
                 }
             }
@@ -267,6 +282,8 @@ namespace Blocks.Core
         {
             int length = bitmap.Count();
             long left = blocks.GetUsedMemory() / 5;
+
+            settings.OnArchiving?.Invoke();
 
             ArchiveValuesNotAccessed(length, ref left);
             ArchiveValuesAccessed(length, ref left);
@@ -332,16 +349,17 @@ namespace Blocks.Core
                 ref TreeNode node = ref bitmap.Get(i);
                 if (node.InMemory() == false) continue;
                 left -= blocks.Archive(ref node);
+                node.Accessed = 0;
             }
         }
 
         private void RewriteMemory(int length, double factor)
         {
+            settings.OnRewritting?.Invoke();
             InMemoryEvolution evolved = blocks.Evolve(factor);
 
             for (int i = 1; i <= length; i++)
             {
-                bool rewritten = false;
                 ref TreeNode node = ref bitmap.Get(i);
                 if (node.InMemory() == false) continue;
 
@@ -357,14 +375,13 @@ namespace Blocks.Core
                     ValueInfo data = blocks.Extract(ref value);
                     InMemoryAllocation allocation = evolved.Allocate(data.Length);
 
-                    rewritten = true;
                     Buffer.BlockCopy(data.Data, data.Offset, allocation.Data, allocation.Offset, data.Length);
 
                     value.Block = allocation.Block;
                     value.Offset = allocation.Offset;
                 }
 
-                if (rewritten || evolved.Contains(node.Block))
+                if (evolved.Contains(node.Block))
                 {
                     InMemoryAllocation allocated = evolved.Allocate(bytes);
                     Buffer.BlockCopy(tree.Data, tree.Node.Offset, allocated.Data, allocated.Offset, bytes);
@@ -375,6 +392,7 @@ namespace Blocks.Core
             }
 
             blocks = evolved.Create();
+            settings.OnRewritten?.Invoke();
         }
     }
 }

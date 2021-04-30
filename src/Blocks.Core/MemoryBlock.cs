@@ -40,7 +40,7 @@ namespace Blocks.Core
             return new InMemoryManager(this);
         }
 
-        public ValueBuilder Builder(short index)
+        public ValueBuilder Builder(int index)
         {
             if (pool.TryDequeue(out var data) == false)
                 data = new byte[size];
@@ -90,9 +90,11 @@ namespace Blocks.Core
         private readonly HashSet<int> obsolete;
         private InMemoryBlock[] blocks;
         private InMemoryBlock[] abandoned;
+        private ValueBuilder[] builders;
+        private ValueFile[] ready;
         private ValueFile[] files;
         private ValueBuilder builder;
-        private InMemoryBlock current;
+        private ValueBuilder current;
 
         public InMemoryEvolution(InMemory memory, ValueBuilder builder, InMemoryBlock[] available, InMemoryBlock[] abandoned, ValueFile[] files)
         {
@@ -104,6 +106,9 @@ namespace Blocks.Core
             this.builder = builder;
             this.obsolete = new HashSet<int>();
 
+            this.ready = new ValueFile[available.Length];
+            this.builders = new ValueBuilder[available.Length];
+
             for (int i = 0; i < abandoned.Length; i++)
                 if (abandoned[i] != null)
                     obsolete.Add(i);
@@ -112,18 +117,10 @@ namespace Blocks.Core
             {
                 if (blocks[i] == null)
                 {
-                    blocks[i] = memory.Block(i);
-                    current = available[i];
+                    builders[i] = memory.Builder(i);
+                    current = builders[i];
                     break;
                 }
-            }
-
-            if (available == null)
-            {
-                Array.Resize(ref blocks, blocks.Length + 1);
-                blocks[^1] = memory.Block(blocks.Length - 1);
-
-                current = blocks[^1];
             }
         }
 
@@ -134,11 +131,14 @@ namespace Blocks.Core
 
         public InMemoryAllocation Allocate(int size)
         {
-            InMemoryBlock block = current;
+            ValueBuilder block = current;
             int offset = block.Allocate(size);
 
             if (offset == -1)
             {
+                int index = block.GetIndex();
+                ready[index] = block.Flush(memory);
+
                 block = Find(size);
                 offset = block.Allocate(size);
             }
@@ -146,21 +146,21 @@ namespace Blocks.Core
             return block.Extract(offset, size);
         }
 
-        private InMemoryBlock Find(int size)
+        private ValueBuilder Find(int size)
         {
-            for (int i = blocks.Length - 1; i >= 0; i--)
+            for (int i = builders.Length - 1; i >= 0; i--)
             {
-                if (blocks[i] == null)
-                    return current = blocks[i] = memory.Block(i);
+                if (blocks[i] == null && ready[i] == null)
+                {
+                    if (builders[i] == null)
+                        return current = builders[i] = memory.Builder(i);
 
-                if (blocks[i].GetLeft() >= size)
-                    return current = blocks[i];
+                    if (builders[i].GetLeft() >= size)
+                        return current = builders[i];
+                }
             }
 
-            Array.Resize(ref blocks, blocks.Length + 1);
-            blocks[^1] = memory.Block(blocks.Length - 1);
-
-            return current = blocks[^1];
+            throw new InvalidOperationException();
         }
 
         public InMemoryManager Create()
@@ -168,6 +168,14 @@ namespace Blocks.Core
             for (int i = 0; i < abandoned.Length; i++)
                 if (abandoned[i] != null)
                     abandoned[i].Free(memory);
+
+            for (int i = 0; i < ready.Length; i++)
+                if (blocks[i] == null && ready[i] == null && builders[i] != null)
+                    ready[i] = builders[i].Flush(memory);
+
+            for (int i = 0; i < ready.Length; i++)
+                if (blocks[i] == null && ready[i] != null)
+                    blocks[i] = ready[i].Restore(memory);
 
             return new InMemoryManager(memory, builder, blocks, files);
         }
@@ -460,13 +468,13 @@ namespace Blocks.Core
 
     public class ValueBuilder
     {
-        private readonly short block;
+        private readonly int block;
         private readonly string path;
         private readonly byte[] data;
         private int offset;
         private int wasted;
 
-        public ValueBuilder(short block, string path, byte[] data)
+        public ValueBuilder(int block, string path, byte[] data)
         {
             this.block = block;
             this.path = path;
@@ -480,12 +488,18 @@ namespace Blocks.Core
 
         public short GetIndex()
         {
-            return block;
+            return (short)block;
         }
 
         public int GetLeft()
         {
             return data.Length - offset;
+        }
+
+        public int Allocate(int size)
+        {
+            if (offset + size > data.Length) return -1;
+            else return (offset += size) - size;
         }
 
         /// <summary>
@@ -506,6 +520,11 @@ namespace Blocks.Core
         public ValueInfo Extract(ValueNode node)
         {
             return new ValueInfo(data, node.Offset, node.Length);
+        }
+
+        public InMemoryAllocation Extract(int offset, int size)
+        {
+            return new InMemoryAllocation(block, data, offset, size);
         }
 
         /// <summary>
@@ -563,17 +582,19 @@ namespace Blocks.Core
             stream.Flush();
 
             memory?.Release(data);
-            return new ValueFile(stream, offset);
+            return new ValueFile(block, stream, offset);
         }
     }
 
     public class ValueFile
     {
+        private readonly int block;
         private readonly int size;
         private readonly FileStream stream;
 
-        public ValueFile(FileStream stream, int size)
+        public ValueFile(int block, FileStream stream, int size)
         {
+            this.block = block;
             this.stream = stream;
             this.size = size;
         }
@@ -616,6 +637,25 @@ namespace Blocks.Core
             }
 
             return new ValueInfo(data, 0, (ushort)read);
+        }
+
+        public InMemoryBlock Restore(InMemory memory)
+        {
+            InMemoryBlock restored = memory.Block(block);
+            int offset = restored.Allocate(size), read = 0;
+
+            stream.Seek(0, SeekOrigin.Begin);
+            var allocation = restored.Extract(offset, size);
+
+            while (read < size)
+            {
+                read += stream.Read(allocation.Data, offset + read, allocation.Length - read);
+            }
+
+            stream.Close();
+            stream.Dispose();
+
+            return restored;
         }
     }
 }

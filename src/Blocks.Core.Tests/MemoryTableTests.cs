@@ -7,10 +7,18 @@ namespace Blocks.Core.Tests
     [TestFixture]
     public class MemoryTableTests
     {
+        private static readonly Settings Settings = new Settings
+        {
+            Path = "/tmp/blocks/",
+            BlockSize = 1024,
+            InitialDepth = 6,
+            MaximalDepth = 24,
+        };
+
         [Test]
         public void ReturnsNothingIfNotFound()
         {
-            MemoryTable table = new MemoryTable("/tmp/blocks/", 1024, 24);
+            MemoryTable table = new MemoryTable(Settings);
             ValueInfo data = table.Get(KeyInfo.From(new byte[] { 1, 2 }));
 
             Assert.True(data.Data == null);
@@ -20,7 +28,7 @@ namespace Blocks.Core.Tests
         [Test]
         public void ReturnsAlreadyInsertedValue()
         {
-            MemoryTable table = new MemoryTable("/tmp/blocks/", 1024, 24);
+            MemoryTable table = new MemoryTable(Settings);
             table.Set(KeyValueInfo.From(new byte[] { 1, 2, 20, 30, 40 }, 2));
 
             ValueInfo data = table.Get(KeyInfo.From(new byte[] { 1, 2 }));
@@ -32,7 +40,7 @@ namespace Blocks.Core.Tests
         [Test]
         public void ReturnsAlreadyOverriddendValueWithShorter()
         {
-            MemoryTable table = new MemoryTable("/tmp/blocks/", 1024, 24);
+            MemoryTable table = new MemoryTable(Settings);
             table.Set(KeyValueInfo.From(new byte[] { 1, 2, 20, 30, 40 }, 2));
             table.Set(KeyValueInfo.From(new byte[] { 1, 2, 50, 60 }, 2));
 
@@ -45,7 +53,7 @@ namespace Blocks.Core.Tests
         [Test]
         public void ReturnsAlreadyOverriddendValueWithLonger()
         {
-            MemoryTable table = new MemoryTable("/tmp/blocks/", 1024, 24);
+            MemoryTable table = new MemoryTable(Settings);
             table.Set(KeyValueInfo.From(new byte[] { 1, 2, 20, 30, 40 }, 2));
             table.Set(KeyValueInfo.From(new byte[] { 1, 2, 50, 60, 70, 80 }, 2));
 
@@ -59,7 +67,7 @@ namespace Blocks.Core.Tests
         public void ResizesWhenCapacityCrossed()
         {
             Random random = new Random(0);
-            MemoryTable table = new MemoryTable("/tmp/blocks/", 65536, 24);
+            MemoryTable table = new MemoryTable(Settings);
             var native = new Dictionary<byte[], byte[]>();
 
             for (int i = 0; i < 150; i++)

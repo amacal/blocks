@@ -1,5 +1,4 @@
 ﻿using System;
-using System.Diagnostics;
 using Blocks.Core;
 
 namespace Blocks
@@ -10,10 +9,21 @@ namespace Blocks
         {
             long read = 0, written = 0, count = 0;
             long started = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
-            string path = args.Length > 0 ? args[0] : "/tmp/blocks/";
+
+            Settings settings = new Settings
+            {
+                Path = args.Length > 0 ? args[0] : "/tmp/blocks/",
+                BlockSize = 64 * 1048576,
+                BlockMemory = 8 * 1024 * 1048576L,
+                InitialDepth = 20,
+                MaximalDepth = 26,
+                OnArchiving = () => Console.WriteLine($"{DateTimeOffset.UtcNow.ToUnixTimeSeconds() - started}: archiving"),
+                OnRewritting = () => Console.WriteLine($"{DateTimeOffset.UtcNow.ToUnixTimeSeconds() - started}: rewritting"),
+                OnRewritten = () => Console.WriteLine($"{DateTimeOffset.UtcNow.ToUnixTimeSeconds() - started}: rewritten"),
+            };
 
             Random randomizer = new Random(0);
-            MemoryTable table = new MemoryTable(path, 64 * 1048576, 28);
+            MemoryTable table = new MemoryTable(settings);
 
             byte[] data = new byte[480];
 
@@ -42,7 +52,7 @@ namespace Blocks
                     long total = DateTimeOffset.UtcNow.ToUnixTimeSeconds() - started;
                     int speed = (int)(count / (total + 1));
 
-                    Console.Write($"{total}, size: {table.GetSize()}, memory: {GC.GetTotalMemory(false) / 1024 / 1024} MB, {speed/1024} kop/s,");
+                    Console.Write($"{total}, size: {table.GetSize()}, depth: {table.GetDepth()}, {speed/1024} Kop/s,");
                     Console.WriteLine($" read: {read/1048576} MB, written: {written/1048576} MB, declared: {table.SizeInBytes()/1048576L} MB");
                 }
             }

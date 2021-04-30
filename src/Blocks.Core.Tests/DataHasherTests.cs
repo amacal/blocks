@@ -1,4 +1,3 @@
-using System;
 using NUnit.Framework;
 
 namespace Blocks.Core.Tests
